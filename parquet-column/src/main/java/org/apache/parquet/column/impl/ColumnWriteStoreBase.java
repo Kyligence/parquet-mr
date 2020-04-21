@@ -192,11 +192,12 @@ abstract class ColumnWriteStoreBase implements ColumnWriteStore {
     long minRecordToWait = Long.MAX_VALUE;
     int pageRowCountLimit = props.getPageRowCountLimit();
     long rowCountForNextRowCountCheck = rowCount + pageRowCountLimit;
+    boolean needWritePage = needWritePage();
     for (ColumnWriterBase writer : columns.values()) {
       long usedMem = writer.getCurrentPageBufferedSize();
       long rows = rowCount - writer.getRowsWrittenSoFar();
       long remainingMem = props.getPageSizeThreshold() - usedMem;
-      if (remainingMem <= thresholdTolerance || rows >= pageRowCountLimit) {
+      if (needWritePage) {
         writer.writePage();
         remainingMem = props.getPageSizeThreshold();
       } else {
@@ -228,6 +229,19 @@ abstract class ColumnWriteStoreBase implements ColumnWriteStore {
     if (rowCountForNextRowCountCheck < rowCountForNextSizeCheck) {
       rowCountForNextSizeCheck = rowCountForNextRowCountCheck;
     }
+  }
+
+  private boolean needWritePage() {
+    int pageRowCountLimit = props.getPageRowCountLimit();
+    for (ColumnWriterBase writer : columns.values()) {
+      long usedMem = writer.getCurrentPageBufferedSize();
+      long rows = rowCount - writer.getRowsWrittenSoFar();
+      long remainingMem = props.getPageSizeThreshold() - usedMem;
+      if (remainingMem <= thresholdTolerance || rows >= pageRowCountLimit) {
+        return true;
+      }
+    }
+    return false;
   }
 
   @Override
