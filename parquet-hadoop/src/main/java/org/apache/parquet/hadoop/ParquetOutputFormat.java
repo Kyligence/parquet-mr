@@ -42,6 +42,7 @@ import org.apache.parquet.hadoop.api.WriteSupport.WriteContext;
 import org.apache.parquet.hadoop.codec.CodecConfig;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.util.ConfigurationUtil;
+import org.apache.parquet.hadoop.util.HadoopOutputFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -96,8 +97,6 @@ import org.slf4j.LoggerFactory;
  *
  * if none of those is set the data is uncompressed.
  *
- * @author Julien Le Dem
- *
  * @param <T> the type of the materialized records
  */
 public class ParquetOutputFormat<T> extends FileOutputFormat<Void, T> {
@@ -144,6 +143,8 @@ public class ParquetOutputFormat<T> extends FileOutputFormat<Void, T> {
   public static final String MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK = "parquet.page.size.row.check.min";
   public static final String MAX_ROW_COUNT_FOR_PAGE_SIZE_CHECK = "parquet.page.size.row.check.max";
   public static final String ESTIMATE_PAGE_SIZE_CHECK = "parquet.page.size.check.estimate";
+  public static final String COLUMN_INDEX_TRUNCATE_LENGTH = "parquet.columnindex.truncate.length";
+  public static final String PAGE_ROW_COUNT_LIMIT = "parquet.page.row.count.limit";
 
   public static JobSummaryLevel getJobSummaryLevel(Configuration conf) {
     String level = conf.get(JOB_SUMMARY_LEVEL);
@@ -313,12 +314,38 @@ public class ParquetOutputFormat<T> extends FileOutputFormat<Void, T> {
     return conf.getInt(MAX_PADDING_BYTES, ParquetWriter.MAX_PADDING_SIZE_DEFAULT);
   }
 
+  public static void setColumnIndexTruncateLength(JobContext jobContext, int length) {
+    setColumnIndexTruncateLength(getConfiguration(jobContext), length);
+  }
+
+  public static void setColumnIndexTruncateLength(Configuration conf, int length) {
+    conf.setInt(COLUMN_INDEX_TRUNCATE_LENGTH, length);
+  }
+
+  private static int getColumnIndexTruncateLength(Configuration conf) {
+    return conf.getInt(COLUMN_INDEX_TRUNCATE_LENGTH, ParquetProperties.DEFAULT_COLUMN_INDEX_TRUNCATE_LENGTH);
+  }
+
+  public static void setPageRowCountLimit(JobContext jobContext, int rowCount) {
+    setPageRowCountLimit(getConfiguration(jobContext), rowCount);
+  }
+
+  public static void setPageRowCountLimit(Configuration conf, int rowCount) {
+    conf.setInt(PAGE_ROW_COUNT_LIMIT, rowCount);
+  }
+
+  private static int getPageRowCountLimit(Configuration conf) {
+    return conf.getInt(PAGE_ROW_COUNT_LIMIT, ParquetProperties.DEFAULT_PAGE_ROW_COUNT_LIMIT);
+  }
+
   private WriteSupport<T> writeSupport;
   private ParquetOutputCommitter committer;
 
   /**
    * constructor used when this OutputFormat in wrapped in another one (In Pig for example)
+   *
    * @param writeSupport the class used to convert the incoming records
+   * @param <S> the Java write support type
    */
   public <S extends WriteSupport<T>> ParquetOutputFormat(S writeSupport) {
     this.writeSupport = writeSupport;
@@ -327,6 +354,8 @@ public class ParquetOutputFormat<T> extends FileOutputFormat<Void, T> {
   /**
    * used when directly using the output format and configuring the write support implementation
    * using parquet.write.support.class
+   *
+   * @param <S> the Java write support type
    */
   public <S extends WriteSupport<T>> ParquetOutputFormat() {
   }
@@ -363,6 +392,8 @@ public class ParquetOutputFormat<T> extends FileOutputFormat<Void, T> {
         .estimateRowCountForPageSizeCheck(getEstimatePageSizeCheck(conf))
         .withMinRowCountForPageSizeCheck(getMinRowCountForPageSizeCheck(conf))
         .withMaxRowCountForPageSizeCheck(getMaxRowCountForPageSizeCheck(conf))
+        .withColumnIndexTruncateLength(getColumnIndexTruncateLength(conf))
+        .withPageRowCountLimit(getPageRowCountLimit(conf))
         .build();
 
     long blockSize = getLongBlockSize(conf);
@@ -380,11 +411,13 @@ public class ParquetOutputFormat<T> extends FileOutputFormat<Void, T> {
       LOG.info("Page size checking is: {}", (props.estimateNextSizeCheck() ? "estimated" : "constant"));
       LOG.info("Min row count for page size check is: {}", props.getMinRowCountForPageSizeCheck());
       LOG.info("Max row count for page size check is: {}", props.getMaxRowCountForPageSizeCheck());
+      LOG.info("Truncate length for column indexes is: {}", props.getColumnIndexTruncateLength());
+      LOG.info("Page row count limit to {}", props.getPageRowCountLimit());
     }
 
     WriteContext init = writeSupport.init(conf);
-    ParquetFileWriter w = new ParquetFileWriter(
-        conf, init.getSchema(), file, Mode.CREATE, blockSize, maxPaddingSize);
+    ParquetFileWriter w = new ParquetFileWriter(HadoopOutputFile.fromPath(file, conf),
+        init.getSchema(), Mode.CREATE, blockSize, maxPaddingSize, props.getColumnIndexTruncateLength());
     w.start();
 
     float maxLoad = conf.getFloat(ParquetOutputFormat.MEMORY_POOL_RATIO,

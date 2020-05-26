@@ -34,7 +34,7 @@ public class SnappyDecompressor implements Decompressor {
   private ByteBuffer inputBuffer = ByteBuffer.allocateDirect(0);
 
   private boolean finished;
-  
+
   /**
    * Fills specified buffer with uncompressed data. Returns actual number
    * of bytes of uncompressed data. A return value of 0 indicates that
@@ -45,7 +45,7 @@ public class SnappyDecompressor implements Decompressor {
    * @param off Start offset of the data
    * @param len Size of the buffer
    * @return The actual number of bytes of uncompressed data.
-   * @throws IOException
+   * @throws IOException if reading or decompression fails
    */
   @Override
   public synchronized int decompress(byte[] buffer, int off, int len) throws IOException {
@@ -61,7 +61,9 @@ public class SnappyDecompressor implements Decompressor {
       // There is compressed input, decompress it now.
       int decompressedSize = Snappy.uncompressedLength(inputBuffer);
       if (decompressedSize > outputBuffer.capacity()) {
+        ByteBuffer oldBuffer = outputBuffer;
         outputBuffer = ByteBuffer.allocateDirect(decompressedSize);
+        CleanUtil.clean(oldBuffer);
       }
 
       // Reset the previous outputBuffer (i.e. set position to 0)
@@ -99,19 +101,24 @@ public class SnappyDecompressor implements Decompressor {
     SnappyUtil.validateBuffer(buffer, off, len);
 
     if (inputBuffer.capacity() - inputBuffer.position() < len) {
-      ByteBuffer newBuffer = ByteBuffer.allocateDirect(inputBuffer.position() + len);
+      int maxSize = Math.max(inputBuffer.position() * 2 , inputBuffer.position() + len);
+      ByteBuffer newBuffer = ByteBuffer.allocateDirect(maxSize);
       inputBuffer.rewind();
       newBuffer.put(inputBuffer);
-      inputBuffer = newBuffer;      
-    } else {
-      inputBuffer.limit(inputBuffer.position() + len);
+      ByteBuffer oldBuffer = inputBuffer;
+      inputBuffer = newBuffer;
+      CleanUtil.clean(oldBuffer);
     }
+
+    inputBuffer.limit(inputBuffer.position() + len);
+
     inputBuffer.put(buffer, off, len);
   }
 
   @Override
   public void end() {
-    // No-op		
+    CleanUtil.clean(inputBuffer);
+    CleanUtil.clean(outputBuffer);
   }
 
   @Override

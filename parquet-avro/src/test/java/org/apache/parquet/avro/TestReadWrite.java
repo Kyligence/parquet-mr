@@ -18,14 +18,15 @@
  */
 package org.apache.parquet.avro;
 
-import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.io.Resources;
 import java.io.File;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -37,6 +38,7 @@ import java.util.Random;
 import org.apache.avro.Conversions;
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
+import org.apache.avro.SchemaBuilder;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericFixed;
 import org.apache.avro.generic.GenericRecord;
@@ -87,10 +89,7 @@ public class TestReadWrite {
     Schema schema = new Schema.Parser().parse(
         Resources.getResource("array.avsc").openStream());
 
-    File tmp = File.createTempFile(getClass().getSimpleName(), ".tmp");
-    tmp.deleteOnExit();
-    tmp.delete();
-    Path file = new Path(tmp.getPath());
+    Path file = new Path(createTempFile().getPath());
 
     ParquetWriter<GenericRecord> writer = AvroParquetWriter
         .<GenericRecord>builder(file)
@@ -117,10 +116,7 @@ public class TestReadWrite {
     Schema schema = new Schema.Parser().parse(
         Resources.getResource("map.avsc").openStream());
 
-    File tmp = File.createTempFile(getClass().getSimpleName(), ".tmp");
-    tmp.deleteOnExit();
-    tmp.delete();
-    Path file = new Path(tmp.getPath());
+    Path file = new Path(createTempFile().getPath());
 
     ParquetWriter<GenericRecord> writer = AvroParquetWriter
         .<GenericRecord>builder(file)
@@ -147,10 +143,7 @@ public class TestReadWrite {
     Schema schema = new Schema.Parser().parse(
         Resources.getResource("map_with_nulls.avsc").openStream());
 
-    File tmp = File.createTempFile(getClass().getSimpleName(), ".tmp");
-    tmp.deleteOnExit();
-    tmp.delete();
-    Path file = new Path(tmp.getPath());
+    Path file = new Path(createTempFile().getPath());
 
     ParquetWriter<GenericRecord> writer = AvroParquetWriter
         .<GenericRecord>builder(file)
@@ -182,10 +175,7 @@ public class TestReadWrite {
     schema.setFields(Lists.newArrayList(
         new Schema.Field("mymap", Schema.createMap(Schema.create(Schema.Type.INT)), null, null)));
 
-    File tmp = File.createTempFile(getClass().getSimpleName(), ".tmp");
-    tmp.deleteOnExit();
-    tmp.delete();
-    Path file = new Path(tmp.getPath());
+    Path file = new Path(createTempFile().getPath());
 
     ParquetWriter<GenericRecord> writer = AvroParquetWriter
         .<GenericRecord>builder(file)
@@ -209,10 +199,7 @@ public class TestReadWrite {
     Schema schema = new Schema.Parser().parse(
         Resources.getResource("map.avsc").openStream());
 
-    File tmp = File.createTempFile(getClass().getSimpleName(), ".tmp");
-    tmp.deleteOnExit();
-    tmp.delete();
-    Path file = new Path(tmp.getPath());
+    Path file = new Path(createTempFile().getPath());
 
     ParquetWriter<GenericRecord> writer = AvroParquetWriter
         .<GenericRecord>builder(file)
@@ -346,11 +333,8 @@ public class TestReadWrite {
     Schema schema = new Schema.Parser().parse(
         Resources.getResource("all.avsc").openStream());
 
-    File tmp = File.createTempFile(getClass().getSimpleName(), ".tmp");
-    tmp.deleteOnExit();
-    tmp.delete();
-    Path file = new Path(tmp.getPath());
-    
+    Path file = new Path(createTempFile().getPath());
+
     ParquetWriter<GenericRecord> writer = AvroParquetWriter
         .<GenericRecord>builder(file)
         .withSchema(schema)
@@ -385,7 +369,7 @@ public class TestReadWrite {
         .set("mylong", 2L)
         .set("myfloat", 3.1f)
         .set("mydouble", 4.1)
-        .set("mybytes", ByteBuffer.wrap("hello".getBytes(Charsets.UTF_8)))
+        .set("mybytes", ByteBuffer.wrap("hello".getBytes(StandardCharsets.UTF_8)))
         .set("mystring", "hello")
         .set("mynestedrecord", nestedRecord)
         .set("myenum", "a")
@@ -414,7 +398,7 @@ public class TestReadWrite {
     assertEquals(2L, nextRecord.get("mylong"));
     assertEquals(3.1f, nextRecord.get("myfloat"));
     assertEquals(4.1, nextRecord.get("mydouble"));
-    assertEquals(ByteBuffer.wrap("hello".getBytes(Charsets.UTF_8)), nextRecord.get("mybytes"));
+    assertEquals(ByteBuffer.wrap("hello".getBytes(StandardCharsets.UTF_8)), nextRecord.get("mybytes"));
     assertEquals(str("hello"), nextRecord.get("mystring"));
     assertEquals(expectedEnumSymbol, nextRecord.get("myenum"));
     assertEquals(nestedRecord, nextRecord.get("mynestedrecord"));
@@ -429,10 +413,7 @@ public class TestReadWrite {
 
   @Test
   public void testAllUsingDefaultAvroSchema() throws Exception {
-    File tmp = File.createTempFile(getClass().getSimpleName(), ".tmp");
-    tmp.deleteOnExit();
-    tmp.delete();
-    Path file = new Path(tmp.getPath());
+    Path file = new Path(createTempFile().getPath());
 
     // write file using Parquet APIs
     ParquetWriter<Map<String, Object>> parquetWriter = new ParquetWriter<Map<String, Object>>(file,
@@ -586,7 +567,7 @@ public class TestReadWrite {
     record.put("mylong", 2L);
     record.put("myfloat", 3.1f);
     record.put("mydouble", 4.1);
-    record.put("mybytes", ByteBuffer.wrap("hello".getBytes(Charsets.UTF_8)));
+    record.put("mybytes", ByteBuffer.wrap("hello".getBytes(StandardCharsets.UTF_8)));
     record.put("mystring", "hello");
     record.put("myenum", "a");
     record.put("mynestedint", 1);
@@ -634,7 +615,7 @@ public class TestReadWrite {
     assertEquals(2L, nextRecord.get("mylong"));
     assertEquals(3.1f, nextRecord.get("myfloat"));
     assertEquals(4.1, nextRecord.get("mydouble"));
-    assertEquals(ByteBuffer.wrap("hello".getBytes(Charsets.UTF_8)), nextRecord.get("mybytes"));
+    assertEquals(ByteBuffer.wrap("hello".getBytes(StandardCharsets.UTF_8)), nextRecord.get("mybytes"));
     assertEquals(str("hello"), nextRecord.get("mystring"));
     assertEquals(str("a"), nextRecord.get("myenum")); // enum symbols are unknown
     assertEquals(nestedRecord, nextRecord.get("mynestedrecord"));
@@ -645,6 +626,74 @@ public class TestReadWrite {
     assertEquals(ImmutableMap.of(str("a"), 1, str("b"), 2), nextRecord.get("mymap"));
     assertEquals(genericFixed, nextRecord.get("myfixed"));
 
+  }
+
+  @Test
+  public void testUnionWithSingleNonNullType() throws Exception {
+    Schema avroSchema = Schema.createRecord("SingleStringUnionRecord", null, null, false);
+    avroSchema.setFields(
+      Collections.singletonList(new Schema.Field("value",
+        Schema.createUnion(Schema.create(Schema.Type.STRING)), null, null)));
+
+    Path file = new Path(createTempFile().getPath());
+
+    // Parquet writer
+    ParquetWriter parquetWriter = AvroParquetWriter.builder(file).withSchema(avroSchema)
+      .withConf(new Configuration())
+      .build();
+
+    GenericRecord record = new GenericRecordBuilder(avroSchema)
+      .set("value", "theValue")
+      .build();
+
+    parquetWriter.write(record);
+    parquetWriter.close();
+
+    AvroParquetReader<GenericRecord> reader = new AvroParquetReader<GenericRecord>(testConf, file);
+    GenericRecord nextRecord = reader.read();
+
+    assertNotNull(nextRecord);
+    assertEquals(str("theValue"), nextRecord.get("value"));
+  }
+
+  @Test
+  public void testDuplicatedValuesWithDictionary() throws Exception {
+    Schema schema = SchemaBuilder.record("spark_schema")
+      .fields().optionalBytes("value").endRecord();
+
+    Path file = new Path(createTempFile().getPath());
+
+    String[] records = {"one", "two", "three", "three", "two", "one", "zero"};
+    try (ParquetWriter<GenericData.Record> writer = AvroParquetWriter
+      .<GenericData.Record>builder(file)
+      .withSchema(schema)
+      .withConf(testConf)
+      .build()) {
+      for (String record : records) {
+        writer.write(new GenericRecordBuilder(schema)
+          .set("value", record.getBytes()).build());
+      }
+    }
+
+    try (ParquetReader<GenericRecord> reader = AvroParquetReader
+      .<GenericRecord>builder(file)
+      .withConf(testConf).build()) {
+      GenericRecord rec;
+      int i = 0;
+      while ((rec = reader.read()) != null) {
+        ByteBuffer buf = (ByteBuffer) rec.get("value");
+        byte[] bytes = new byte[buf.remaining()];
+        buf.get(bytes);
+        assertEquals(records[i++], new String(bytes));
+      }
+    }
+  }
+
+  private File createTempFile() throws IOException {
+    File tmp = File.createTempFile(getClass().getSimpleName(), ".tmp");
+    tmp.deleteOnExit();
+    tmp.delete();
+    return tmp;
   }
 
   /**
