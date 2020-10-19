@@ -116,6 +116,10 @@ public class ParquetFileReader implements Closeable {
 
   private final ParquetMetadataConverter converter;
 
+  private ThreadLocal<Boolean> isPageAligned = null;
+
+  private boolean confirmAligned = false;
+
   /**
    * for files provided, check if there's a summary file.
    * If a summary file is found it is used otherwise the file footer is used.
@@ -665,6 +669,7 @@ public class ParquetFileReader implements Closeable {
     this.converter = new ParquetMetadataConverter(configuration);
     this.file = HadoopInputFile.fromPath(filePath, configuration);
     this.fileMetaData = fileMetaData;
+    this.confirmAligned = Boolean.parseBoolean(fileMetaData.getKeyValueMetaData().getOrDefault("parquet.page.confirmAligned", "false"));
     this.f = file.newStream();
     this.options = HadoopReadOptions.builder(configuration).build();
     this.blocks = filterRowGroups(blocks);
@@ -730,6 +735,7 @@ public class ParquetFileReader implements Closeable {
     this.options = HadoopReadOptions.builder(conf).build();
     this.footer = footer;
     this.fileMetaData = footer.getFileMetaData();
+    this.confirmAligned = Boolean.parseBoolean(fileMetaData.getKeyValueMetaData().getOrDefault("parquet.page.confirmAligned", "false"));
     this.blocks = filterRowGroups(footer.getBlocks());
     this.blockIndexStores = listWithNulls(this.blocks.size());
     this.blockRowRanges = listWithNulls(this.blocks.size());
@@ -753,6 +759,7 @@ public class ParquetFileReader implements Closeable {
       throw e;
     }
     this.fileMetaData = footer.getFileMetaData();
+    this.confirmAligned = Boolean.parseBoolean(fileMetaData.getKeyValueMetaData().getOrDefault("parquet.page.confirmAligned", "false"));
     this.blocks = filterRowGroups(footer.getBlocks());
     blockIndexStores1 = listWithNulls(this.blocks.size());
     this.blockRowRanges = listWithNulls(this.blocks.size());
@@ -918,6 +925,9 @@ public class ParquetFileReader implements Closeable {
    */
   public PageReadStore readNextFilteredRowGroup() throws IOException {
     ParquetMetrics.get().filteredGroupReadStart();
+    if (isPageAligned != null && !isPageAligned.get()) {
+      return readNextRowGroup();
+    }
     long start = System.currentTimeMillis();
     if (currentBlock == blocks.size()) {
       return null;
@@ -950,14 +960,37 @@ public class ParquetFileReader implements Closeable {
     ChunkListBuilder builder = new ChunkListBuilder();
     List<ConsecutivePartList> allParts = new ArrayList<ConsecutivePartList>();
     ConsecutivePartList currentParts = null;
+    long filteredPageCount = -1;
+    ArrayList<Long> firstRowIndexes = new ArrayList<>();
+    int totalPages = 0;
     for (ColumnChunkMetaData mc : block.getColumns()) {
       ColumnPath pathKey = mc.getPath();
       ColumnDescriptor columnDescriptor = paths.get(pathKey);
       if (columnDescriptor != null) {
         OffsetIndex offsetIndex = ciStore.getOffsetIndex(mc.getPath());
-        ParquetMetrics.get().accumulateTotalPages(offsetIndex.getPageCount());
+        totalPages += offsetIndex.getPageCount();
         OffsetIndex filteredOffsetIndex = filterOffsetIndex(offsetIndex, rowRanges,
             block.getRowCount());
+        if (!confirmAligned && isPageAligned == null) {
+          if (filteredPageCount == -1) {
+            filteredPageCount = filteredOffsetIndex.getPageCount();
+            for (int i = 0; i < filteredPageCount; i++) {
+              firstRowIndexes.add(filteredOffsetIndex.getFirstRowIndex(i));
+            }
+          } else {
+            if (filteredOffsetIndex.getPageCount() != filteredPageCount) {
+              isPageAligned = ThreadLocal.withInitial(() -> false);
+              return readNextRowGroup();
+            } else {
+              for (int j = 0; j < filteredPageCount; j++) {
+                if (filteredOffsetIndex.getFirstRowIndex(j) != firstRowIndexes.get(j)) {
+                  isPageAligned = ThreadLocal.withInitial(() -> false);
+                  return readNextRowGroup();
+                }
+              }
+            }
+          }
+        }
         for (OffsetRange range : calculateOffsetRanges(filteredOffsetIndex, mc, offsetIndex.getOffset(0))) {
           BenchmarkCounter.incrementTotalBytes(range.getLength());
           long startingPos = range.getOffset();
@@ -973,6 +1006,7 @@ public class ParquetFileReader implements Closeable {
         }
       }
     }
+    ParquetMetrics.get().accumulateTotalPages(totalPages);
     // actually read all the chunks
     for (ConsecutivePartList consecutiveChunks : allParts) {
       consecutiveChunks.readAll(f, builder);

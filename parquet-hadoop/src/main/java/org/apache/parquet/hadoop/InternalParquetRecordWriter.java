@@ -119,6 +119,7 @@ class InternalParquetRecordWriter<T> {
         finalMetadata.put(ParquetWriter.OBJECT_MODEL_NAME_PROP, modelName);
       }
       finalMetadata.putAll(finalWriteContext.getExtraMetaData());
+      finalMetadata.put("parquet.page.confirmAligned", "true");
       parquetFileWriter.end(finalMetadata);
       closed = true;
     }
