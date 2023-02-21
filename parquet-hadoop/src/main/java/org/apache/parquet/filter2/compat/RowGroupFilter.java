@@ -23,6 +23,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.parquet.filter2.bloomfilterlevel.BloomFilterImpl;
 import org.apache.parquet.filter2.compat.FilterCompat.Filter;
 import org.apache.parquet.filter2.compat.FilterCompat.NoOpFilter;
@@ -34,8 +37,6 @@ import org.apache.parquet.filter2.statisticslevel.StatisticsFilter;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.schema.MessageType;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Given a {@link Filter} applies it to a list of BlockMetaData (row groups)
@@ -43,10 +44,14 @@ import org.slf4j.LoggerFactory;
  * no filtering will be performed.
  */
 public class RowGroupFilter implements Visitor<List<BlockMetaData>> {
+
+  public static Logger LOGGER = LoggerFactory.getLogger(RowGroupFilter.class);
+
   private final List<BlockMetaData> blocks;
   private final MessageType schema;
   private final List<FilterLevel> levels;
   private final ParquetFileReader reader;
+  private KylinQueryInfo kylinQueryInfo = new KylinQueryInfo();
 
   public enum FilterLevel {
     STATISTICS,
@@ -72,6 +77,18 @@ public class RowGroupFilter implements Visitor<List<BlockMetaData>> {
     return filter.accept(new RowGroupFilter(levels, blocks, reader));
   }
 
+  public static List<BlockMetaData> filterRowGroups(List<FilterLevel> levels, Filter filter, List<BlockMetaData> blocks,
+    ParquetFileReader reader, KylinQueryInfo kylinQueryInfo) {
+    Objects.requireNonNull(filter, "filter cannot be null");
+    return filter.accept(new RowGroupFilter(levels, blocks, reader, kylinQueryInfo));
+  }
+
+  public static void logTimeIfNeed(String tag, long start, long end) {
+    if ((end - start) > 200) {
+      LOGGER.warn(" Kylin read " + tag + " cost much time : " + (end - start));
+    }
+  }
+
   @Deprecated
   private RowGroupFilter(List<BlockMetaData> blocks, MessageType schema) {
     this.blocks = Objects.requireNonNull(blocks, "blocks cannnot be null");
@@ -87,6 +104,15 @@ public class RowGroupFilter implements Visitor<List<BlockMetaData>> {
     this.levels = levels;
   }
 
+  private RowGroupFilter(List<FilterLevel> levels, List<BlockMetaData> blocks, ParquetFileReader reader,
+    KylinQueryInfo kylinQueryInfo) {
+    this.blocks = Objects.requireNonNull(blocks, "blocks cannnot be null");
+    this.reader = Objects.requireNonNull(reader, "reader cannnot be null");
+    this.schema = reader.getFileMetaData().getSchema();
+    this.levels = levels;
+    this.kylinQueryInfo = kylinQueryInfo;
+  }
+
   @Override
   public List<BlockMetaData> visit(FilterCompat.FilterPredicateCompat filterPredicateCompat) {
     FilterPredicate filterPredicate = filterPredicateCompat.getFilterPredicate();
@@ -95,7 +121,7 @@ public class RowGroupFilter implements Visitor<List<BlockMetaData>> {
     SchemaCompatibilityValidator.validate(filterPredicate, schema);
 
     List<BlockMetaData> filteredBlocks = new ArrayList<BlockMetaData>();
-
+    long start = System.currentTimeMillis();
     for (BlockMetaData block : blocks) {
       boolean drop = false;
 
@@ -109,13 +135,20 @@ public class RowGroupFilter implements Visitor<List<BlockMetaData>> {
 
       if (!drop && levels.contains(FilterLevel.BLOOMFILTER)) {
         drop = BloomFilterImpl.canDrop(filterPredicate, block.getColumns(), reader.getBloomFilterDataReader(block));
+        this.kylinQueryInfo.setTotalBloomBlocks(this.kylinQueryInfo.getTotalBloomBlocks() + 1);
+        if (drop) {
+          this.kylinQueryInfo.setSkipBloomFilter(this.kylinQueryInfo.getSkipBloomFilter() + filterPredicateCompat);
+          this.kylinQueryInfo.setSkipBloomRows(this.kylinQueryInfo.getSkipBloomRows() + block.getRowCount());
+          this.kylinQueryInfo.setSkipBloomBlocks(this.kylinQueryInfo.getSkipBloomBlocks() + 1);
+        }
       }
 
       if(!drop) {
         filteredBlocks.add(block);
       }
     }
-
+    long end = System.currentTimeMillis();
+    logTimeIfNeed(" RowGroupFilter ", start, end);
     return filteredBlocks;
   }
 
